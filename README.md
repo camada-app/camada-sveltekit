@@ -56,7 +56,11 @@ if camada were not installed.
    (adapter-node honours its `ADDRESS_HEADER` / `XFF_DEPTH`, adapter-cloudflare reads
    `cf-connecting-ip`) — falling back to `X-Forwarded-For` only under your tenant's
    trusted-proxy config. A client header alone is never the ip. When the adapter has no address
-   (prerendering) the ip is null: ip rules and the challenge stand down, the event still ships.
+   (prerendering) the ip is null: ip rules and the challenge stand down, the event still ships —
+   so a `vite build` with prerendered routes ships one first-visit page event per route from the
+   build machine; set `CAMADA_DISABLED=1` in the build env to suppress them. A server-side
+   `event.fetch` to the app's own routes (`isSubRequest`) is left alone: one page view is one
+   event, and the page-level verdict is not re-applied to your own `load()`.
 3. Runs your ordered custom rules, then the allow, block and challenge lists.
 4. **Block** → `403` with `x-block-reason` before `resolve()`; the event still ships, with
    `st: 403` and `blk: <reason>` so the analyst counts SDK blocks apart from your own 403s.
@@ -84,7 +88,7 @@ through untouched.
 | `snapshotVersion` | `5` | `4` drops the custom rules, `3` the allow/challenge sides too |
 | `scriptPath` | `/_cam/b.js` | where the first-party beacon script is served |
 | `fpPath` | `/_cam/fp` | where that script posts the beacon; keep it in `scriptPath`'s directory |
-| `mode` | `lazy` | `lazy` refreshes the snapshot per request off-path; `timer` polls on an interval (long-lived Node only). `CAMADA_SERVERLESS=1` forces `lazy` |
+| `mode` | `lazy` (or `timer`) | `timer` polls the snapshot on an unref'd interval (long-lived process); `lazy` refreshes it per request off-path. `CAMADA_SERVERLESS=1` forces `lazy` |
 | `env` | `process.env` + `platform.env` | overrides the host env (tests, and apps that read config themselves) |
 
 `CAMADA_CHALLENGE=0` in the env switches the challenge off without a code change.
@@ -157,12 +161,14 @@ This is the in-app position: the beacon, the client hints the browser sends, the
 your routes answered, the `_sfp` session, and the app context `track()` adds. What SvelteKit
 vouches for depends on the adapter. `getClientAddress()` is the one address the handle trusts;
 on adapter-cloudflare `event.platform.cf` also supplies `asn`, `country`,
-`tlsClientExtensionsSha1` and `httpProtocol`, so ASN, country and TLS-fingerprint rules
-genuinely enforce there and the protocol on the event is the visitor's own hop. On adapter-node
-and the other adapters none of those exist — the request arrives as a `Request` with no
-connection facts, no client protocol, and headers already normalised — so those rules do not
-fire and the analyst, knowing this tap's capability mask (`sdk-sveltekit`), never scores their
-absence as evidence. No forwarded header is ever read for any of them.
+`tlsClientExtensionsSha1` and `httpProtocol`: the handle evaluates ASN, country and
+TLS-fingerprint rules on them locally and stamps `asn`, `cc`, `tlsx` and the visitor's own
+protocol on the event, but the analyst's capability mask for `sdk-sveltekit` does not credit
+them (it is one mask for every adapter), so rules on those conditions are reported as not
+enforceable by this SDK and the shipped facts are enrichment only. On adapter-node and the
+other adapters none of those exist — the request arrives as a `Request` with no connection
+facts, no client protocol, and headers already normalised — so those rules do not fire and the
+analyst never scores their absence as evidence. No forwarded header is ever read for any of them.
 
 ## Fail open
 
