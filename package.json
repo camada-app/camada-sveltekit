@@ -1,0 +1,47 @@
+{
+  "name": "@camada/sveltekit",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "description": "camada SDK for SvelteKit (hooks.server.ts handle): snapshot enforcement, first-party challenge and beacon, track() outcomes, waitUntil-flushed event shipping on Cloudflare",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@camada/core": "file:../camada-core",
+    "@camada/browser": "file:../camada-browser"
+  },
+  "peerDependencies": {
+    "@sveltejs/kit": ">=2"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "^2.0.0",
+    "@types/node": "^22.10.0",
+    "svelte": "^5.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}
