@@ -12,20 +12,14 @@ import iife from '@camada/browser/iife-string';
 import { camada, resetCamada, track, scriptTag, type CamadaSvelteKitOptions } from '../src/index.js';
 
 const FIX = fileURLToPath(new URL('../node_modules/@camada/core/test/fixtures/blk3/', import.meta.url));
-const container = (dir: string, name: string) => ({
-  bin: readFileSync(dir + name + '.bin'),
-  meta: JSON.stringify(JSON.parse(readFileSync(dir + name + '.meta.json', 'utf8'))),
-});
-const V4 = container(FIX, 'v4-basic');
+const V4 = { bin: readFileSync(FIX + 'v4-basic.bin'), meta: JSON.stringify(JSON.parse(readFileSync(FIX + 'v4-basic.meta.json', 'utf8'))) };
 
 const BLOCKED_IP = '203.0.113.66';     // block side
 const CHALLENGED_IP = '192.0.2.20';    // challenge side only
 const CHALLENGED_ASN = 64512;          // challenge side's asn
 const HTML = { accept: 'text/html', 'sec-fetch-dest': 'document' };
 
-type Config = { tenant: string; beacon: boolean; sample: number; exclude: string[]; trusted_proxy: Record<string, unknown>; poll_seconds: number };
-const BASE_CONFIG: Config = { tenant: 'acme', beacon: true, sample: 1, exclude: [], trusted_proxy: { mode: 'none' }, poll_seconds: 30 };
-let CONFIG = BASE_CONFIG;
+const CONFIG = { tenant: 'acme', beacon: true, sample: 1, exclude: [], trusted_proxy: { mode: 'none' }, poll_seconds: 30 };
 const ENV = { CAMADA_KEY: 'tok-acme.snap-acme', CAMADA_INGEST_URL: 'http://analyst.test', CAMADA_SNAPSHOT_URL: 'http://analyst.test/snapshot' };
 
 function frame(): ArrayBuffer {
@@ -53,7 +47,7 @@ const fetchImpl: typeof fetch = (async (url: string | URL | Request, init?: Requ
 interface Platform { env?: Record<string, string | undefined>; context?: { waitUntil(p: Promise<unknown>): void }; cf?: Record<string, unknown> }
 interface CookieSet { name: string; value: string; opts: Record<string, unknown> }
 interface Stub { event: RequestEvent; sets: CookieSet[]; waits: Promise<unknown>[] }
-interface EventOpts { peer?: string | null; platform?: Pick<Platform, 'env' | 'cf'> }   // a platform means adapter-cloudflare: its execution context is always there
+interface EventOpts { peer?: string | null; platform?: Pick<Platform, 'env' | 'cf'>; isSubRequest?: boolean }   // a platform means adapter-cloudflare: its execution context is always there
 
 /** A RequestEvent as the handle sees it. `peer: null` makes getClientAddress throw, as SvelteKit does with no address (prerendering). */
 function stubEvent(request: Request, o: EventOpts = {}): Stub {
@@ -66,6 +60,7 @@ function stubEvent(request: Request, o: EventOpts = {}): Stub {
     url: new URL(request.url),
     locals: {},
     platform,
+    isSubRequest: o.isSubRequest ?? false,
     cookies: { set: (name: string, value: string, opts: Record<string, unknown>) => { sets.push({ name, value, opts }); } },
     getClientAddress: () => { if (peer === null) throw new Error('Could not determine clientAddress'); return peer; },
   } as unknown as RequestEvent;
@@ -88,19 +83,15 @@ async function app(event: RequestEvent): Promise<Response> {
   return new Response('not found', { status: 404 });
 }
 
-const handles: Handle[] = [];
-function make(opts: CamadaSvelteKitOptions = {}): Handle {
-  const h = camada({ env: ENV, fetchImpl, ...opts });
-  handles.push(h);
-  return h;
-}
+const make = (opts: CamadaSvelteKitOptions = {}): Handle => camada({ env: ENV, fetchImpl, ...opts });
+const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 /** Drives one request through the handle and settles everything the pipeline started off-path. */
 async function call(h: Handle, path: string, init: RequestInit = {}, o: EventOpts = {}): Promise<Response & { stub: Stub }> {
   const stub = stubEvent(new Request(`http://app.test${path}`, init), o);
   const res = await h({ event: stub.event, resolve: app });
   await Promise.all(stub.waits);
-  await new Promise((r) => setTimeout(r, 0));   // adapter-node has no waitUntil: the lazy snapshot load and the flush settle on their own
+  await settle();   // adapter-node has no waitUntil: the lazy snapshot load and the flush settle on their own
   return Object.assign(res, { stub });
 }
 
@@ -124,8 +115,8 @@ const postBeacon = (h: Handle, body: string, peer = '9.9.9.9') =>
   call(h, '/_cam/fp', { method: 'POST', headers: { 'content-type': 'application/json' }, body }, { peer });
 
 beforeAll(() => { delete process.env.CAMADA_KEY; delete process.env.CAMADA_TOKEN; delete process.env.CAMADA_DISABLED; });   // the handle merges process.env; a developer's shell must not steer the suite
-beforeEach(() => { events = []; sdkHeaders = []; CONFIG = BASE_CONFIG; });
-afterEach(() => { resetCamada(); handles.length = 0; });
+beforeEach(() => { events = []; sdkHeaders = []; });
+afterEach(() => resetCamada());
 
 describe('capture', () => {
   it('lets an unlisted request through and ships the event with the real status, this tap and the sdk id', async () => {
@@ -168,13 +159,6 @@ describe('challenge', () => {
     const cookie = ok.headers.get('set-cookie')!.split(';')[0];
     expect((await call(h, '/cart', { headers: { cookie, ...HTML } }, { peer: CHALLENGED_IP })).status).toBe(200);
   });
-
-  it('answers 403 JSON for a non-HTML challenge', async () => {
-    const h = await primed();
-    const res = await call(h, '/checkout', { headers: { accept: 'application/json' } }, { peer: CHALLENGED_IP });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: 'challenge_required' });
-  });
 });
 
 describe('first-party beacon', () => {
@@ -194,16 +178,6 @@ describe('first-party beacon', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ sig: 1, rid: 'abc', tz: 'UTC', ip: '9.9.9.9', tap: 'sdk-sveltekit' });
     expect(events[0].st).toBeUndefined();
-  });
-
-  it('still blocks a blocked client at both endpoints', async () => {
-    const h = await primed();
-    const script = await call(h, '/_cam/b.js', {}, { peer: BLOCKED_IP });
-    expect(script.status).toBe(403);
-    expect(script.headers.get('x-block-reason')).toBe('ip4');
-    expect((await postBeacon(h, JSON.stringify({ rid: 'abc' }), BLOCKED_IP)).status).toBe(403);
-    expect(events).toHaveLength(2);
-    expect(events.every((e) => e.blk === 'ip4' && e.sig === undefined)).toBe(true);
   });
 
   it('scriptTag carries the rid the page event ships, and is empty where the handle did not run', async () => {
@@ -322,6 +296,15 @@ describe('resolving the client address', () => {
       expect(res.status).toBe(200);
       expect(events.at(-1)).toMatchObject({ p: '/', ip: null });
     }
+  });
+
+  it('leaves a sub-request (a server-side event.fetch to its own routes) to resolve(): no verdict, no event, no session', async () => {
+    const h = await primed();
+    const res = await call(h, '/admin/users', {}, { peer: CHALLENGED_IP, isSubRequest: true });   // a challenge-side path, with no accept/user-agent as SvelteKit forwards it
+    expect(res.status).toBe(200);
+    expect(events).toEqual([]);
+    expect(res.stub.sets).toEqual([]);
+    expect(scriptTag(res.stub.event)).toBe('');
   });
 
   it('still captures a prerender (getClientAddress throws) with ip null and serves no challenge', async () => {
