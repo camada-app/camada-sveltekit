@@ -69,6 +69,17 @@ function stubEvent(request: Request, o: EventOpts = {}): Stub {
 
 const html = (s: string) => new Response(s, { headers: { 'content-type': 'text/html' } });
 /** The app behind the handle: what a route would answer, with the two helpers used the way a load/action would. */
+/** Three chunks 40 ms apart: a streamed page whose body outlives the handler. */
+const slowBody = (): ReadableStream<Uint8Array> => {
+  let i = 0;
+  return new ReadableStream({
+    async pull(ctrl) {
+      await new Promise((r) => setTimeout(r, 40));
+      if (i++ < 3) ctrl.enqueue(new TextEncoder().encode('x')); else ctrl.close();
+    },
+  });
+};
+
 async function app(event: RequestEvent): Promise<Response> {
   const { pathname } = new URL(event.request.url);
   const method = event.request.method;
@@ -78,6 +89,8 @@ async function app(event: RequestEvent): Promise<Response> {
   if (pathname === '/admin/users') return html('<p>admin</p>');
   if (pathname === '/page') return html(`<html><head>${scriptTag(event)}</head><body>page</body></html>`);
   if (pathname === '/redirect') return Response.redirect('http://app.test/', 302);   // immutable headers
+  if (pathname === '/etag') return new Response(slowBody(), { headers: { etag: '"v1"' } });
+  if (pathname === '/stream') return new Response(slowBody());
   if (pathname === '/login' && method === 'POST') { await track(event, 'login_failed', { user: 'alice@example.com' }); return new Response('no', { status: 401 }); }
   if (pathname === '/signup' && method === 'POST') { void track(event, 'signup'); return new Response('ok'); }   // fire-and-forget: waitUntil must carry it
   return new Response('not found', { status: 404 });
@@ -90,9 +103,10 @@ const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((r) =
 async function call(h: Handle, path: string, init: RequestInit = {}, o: EventOpts = {}): Promise<Response & { stub: Stub }> {
   const stub = stubEvent(new Request(`http://app.test${path}`, init), o);
   const res = await h({ event: stub.event, resolve: app });
+  const body = res?.body ? await res.arrayBuffer() : null;   // send the body as the host would: the event ships once it has gone out
   await Promise.all(stub.waits);
   await settle();   // adapter-node has no waitUntil: the lazy snapshot load and the flush settle on their own
-  return Object.assign(res, { stub });
+  return Object.assign(body === null ? res : new Response(body, res), { stub });   // a bodiless response comes back as the handle returned it
 }
 
 /** The first request is cold (fail open) and loads the snapshot. */
@@ -119,6 +133,19 @@ beforeEach(() => { events = []; sdkHeaders = []; });
 afterEach(() => resetCamada());
 
 describe('capture', () => {
+  it('times a streamed page to its last byte, and an etagged one (SvelteKit may 304 it) at once', async () => {
+    const h = await primed();
+    const res = await h({ event: stubEvent(new Request('http://app.test/stream')).event, resolve: app });
+    await settle();
+    expect(events.some((e) => e.p === '/stream')).toBe(false);   // the body is still going out
+    expect(await res.text()).toBe('xxx');
+    await settle();
+    expect(events.find((e) => e.p === '/stream')!.dur as number).toBeGreaterThanOrEqual(140);
+    await h({ event: stubEvent(new Request('http://app.test/etag')).event, resolve: app });   // body never read, as after a 304
+    await settle();
+    expect(events.find((e) => e.p === '/etag')).toMatchObject({ st: 200 });
+  });
+
   it('lets an unlisted request through and ships the event with the real status, this tap and the sdk id', async () => {
     const h = await primed();
     expect((await call(h, '/')).status).toBe(200);
@@ -126,7 +153,7 @@ describe('capture', () => {
     await call(h, '/nope');
     expect(events.at(-1)).toMatchObject({ p: '/nope', st: 404 });
     expect(sdkHeaders.length).toBeGreaterThan(0);
-    expect(sdkHeaders.every((s) => s === '@camada/sveltekit/0.1.1')).toBe(true);
+    expect(sdkHeaders.every((s) => s === '@camada/sveltekit/0.1.2')).toBe(true);
   });
 
   it('blocks a listed ip with 403 before resolve() and ships blk', async () => {
