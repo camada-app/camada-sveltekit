@@ -6,7 +6,9 @@ proof-of-work challenge page and beacon, records the outcomes your actions know 
 ships wire events off the response path — through `waitUntil` on Cloudflare, in the background
 on Node. Fails open by design — a camada outage or bug never 5xxes your app.
 
-Not yet on npm — consumed via a `file:` dependency from a sibling checkout.
+```sh
+npm install @camada/sveltekit
+```
 
 ## Quickstart
 
