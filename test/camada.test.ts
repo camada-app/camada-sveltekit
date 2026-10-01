@@ -89,8 +89,8 @@ async function app(event: RequestEvent): Promise<Response> {
   if (pathname === '/admin/users') return html('<p>admin</p>');
   if (pathname === '/page') return html(`<html><head>${scriptTag(event)}</head><body>page</body></html>`);
   if (pathname === '/redirect') return Response.redirect('http://app.test/', 302);   // immutable headers
-  if (pathname === '/etag') return new Response(slowBody(), { headers: { etag: '"v1"' } });
-  if (pathname === '/stream') return new Response(slowBody());
+  if (pathname === '/etag') return new Response(slowBody(), { headers: { etag: '"v1"', 'content-type': 'text/event-stream' } });
+  if (pathname === '/stream') return new Response(slowBody(), { headers: { 'content-type': 'text/event-stream' } });
   if (pathname === '/login' && method === 'POST') { await track(event, 'login_failed', { user: 'alice@example.com' }); return new Response('no', { status: 401 }); }
   if (pathname === '/signup' && method === 'POST') { void track(event, 'signup'); return new Response('ok'); }   // fire-and-forget: waitUntil must carry it
   return new Response('not found', { status: 404 });
@@ -133,7 +133,7 @@ beforeEach(() => { events = []; sdkHeaders = []; });
 afterEach(() => resetCamada());
 
 describe('capture', () => {
-  it('times a streamed page to its last byte, and an etagged one (SvelteKit may 304 it) at once', async () => {
+  it('times an SSE body to its last byte, and an etagged one (SvelteKit may 304 it) at once', async () => {
     const h = await primed();
     const res = await h({ event: stubEvent(new Request('http://app.test/stream')).event, resolve: app });
     await settle();
