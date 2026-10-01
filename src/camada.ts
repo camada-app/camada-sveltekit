@@ -76,10 +76,10 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
     }, undefined);
     const res = await resolve(event);
     // SvelteKit swaps a 200 carrying an etag for a bodiless 304 after this hook when the client's
-    // If-None-Match matches, dropping the body unread: waiting on it would never ship. Those are
-    // buffered (prerendered or etagged) pages, so the handler's return is their full duration.
+    // If-None-Match matches, dropping the body unread: waiting on it would never ship, so an
+    // etagged response ships now even when it is an event stream.
     if (res.headers.has('etag')) { cam.after(event.request, vars, res.status); return res; }
-    return cam.finish(event.request, vars, res);   // ships once the body has gone out: dur covers a streamed page
+    return cam.finish(event.request, vars, res);   // an SSE body ships once it has gone out; anything else ships now, untouched
   };
 }
 
