@@ -4,7 +4,7 @@
 // an edge adapter hands over, the cookie API, and `event.locals` as the per-request slot.
 import type { Handle, RequestEvent } from '@sveltejs/kit';
 import { guarded, TAP_SVELTEKIT } from '@camada/core';
-import { createFetchCamada, SESSION_COOKIE, SESSION_MAX_AGE, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
+import { createFetchCamada, SESSION_COOKIE, SESSION_MAX_AGE, withRid, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
 import iife from '@camada/browser/iife-string';
 import { SDK_ID } from './version.js';
 
@@ -78,7 +78,7 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
     // SvelteKit swaps a 200 carrying an etag for a bodiless 304 after this hook when the client's
     // If-None-Match matches, dropping the body unread: waiting on it would never ship, so an
     // etagged response ships now even when it is an event stream.
-    if (res.headers.has('etag')) { cam.after(event.request, vars, res.status); return res; }
+    if (res.headers.has('etag')) { cam.after(event.request, vars, res.status); return withRid(res, vars); }
     return cam.finish(event.request, vars, res);   // an SSE body ships once it has gone out; anything else ships now, untouched
   };
 }
