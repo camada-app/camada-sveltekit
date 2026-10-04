@@ -4,7 +4,7 @@
 // an edge adapter hands over, the cookie API, and `event.locals` as the per-request slot.
 import type { Handle, RequestEvent } from '@sveltejs/kit';
 import { guarded, TAP_SVELTEKIT } from '@camada/core';
-import { createFetchCamada, SESSION_COOKIE, SESSION_MAX_AGE, withRid, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
+import { createFetchCamada, withRid, withSetCookie, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
 import iife from '@camada/browser/iife-string';
 import { SDK_ID } from './version.js';
 
@@ -64,23 +64,18 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
     if (!r) return resolve(event);
     if (r.response) return r.response;
     const vars = r.vars;
-    guarded(() => {
-      (event.locals as Record<string, unknown>)[VAR] = vars;
-      // The framework cookie API: SvelteKit adds the header to whatever resolve() returns, so a
-      // redirect or an immutable Response needs no rebuilding here.
-      if (vars.sessionCookie && vars.sid) {
-        event.cookies.set(SESSION_COOKIE, vars.sid, {
-          path: '/', maxAge: SESSION_MAX_AGE, httpOnly: true, sameSite: 'lax', secure: new URL(event.request.url).protocol === 'https:',
-        });
-      }
-    }, undefined);
+    guarded(() => { (event.locals as Record<string, unknown>)[VAR] = vars; }, undefined);
+    // The _sfp cookie rides the response, not `event.cookies.set`: SvelteKit appends those in place
+    // after resolve(), which throws on an immutable Response (a `fetch()` result, `Response.redirect()`).
+    // withSetCookie copies such a response; the hook sees it, so the 500 never happens.
     const res = await resolve(event);
     // SvelteKit swaps a 200 carrying an etag for a bodiless 304 after this hook when the client's
     // If-None-Match matches, dropping the body unread: waiting on it would never ship, so an
     // etagged response ships now even when it is an event stream. (That 304 is built by SvelteKit
     // from a fixed header allow-list, so it carries no x-rid; the hook cannot change that.)
-    if (res.headers.has('etag')) { cam.after(event.request, vars, res.status); return guarded(() => withRid(res, vars), res); }
-    return cam.finish(event.request, vars, res);   // an SSE body ships once it has gone out; anything else ships now, untouched
+    const out = guarded(() => (vars.sessionCookie ? withSetCookie(res, vars.sessionCookie) : res), res);
+    if (out.headers.has('etag')) { cam.after(event.request, vars, out.status); return guarded(() => withRid(out, vars), out); }
+    return cam.finish(event.request, vars, out);   // an SSE body ships once it has gone out; anything else ships now, untouched
   };
 }
 
