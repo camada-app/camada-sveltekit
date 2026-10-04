@@ -19,5 +19,8 @@ Needs `@camada/core` 0.5.0.
 
 ### Fixed
 
+- A first visit to an endpoint that returns a `fetch()` result (or `Response.redirect()`) answered 500
+  (`TypeError: immutable`): the `_sfp` cookie is now set on the response through core's
+  `withSetCookie`, which copies an immutable one, instead of `event.cookies.set`.
 - Path rules match the canonical path (through `@camada/core` 0.5.0). A percent-encoded,
   upper-cased or trailing-slash spelling of a blocked path used to slip past the block.

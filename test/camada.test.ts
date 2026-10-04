@@ -64,6 +64,7 @@ function stubEvent(request: Request, o: EventOpts = {}): Stub {
     cookies: { set: (name: string, value: string, opts: Record<string, unknown>) => { sets.push({ name, value, opts }); } },
     getClientAddress: () => { if (peer === null) throw new Error('Could not determine clientAddress'); return peer; },
   } as unknown as RequestEvent;
+  (event as unknown as { __sets: CookieSet[] }).__sets = sets;
   return { event, sets, waits };
 }
 
@@ -79,6 +80,13 @@ const slowBody = (): ReadableStream<Uint8Array> => {
     },
   });
 };
+
+/** SvelteKit's resolve(): the route answers, then `add_cookies_to_headers` appends whatever the handle or the app put through `event.cookies.set`. It appends in place, so an immutable Response (`Response.redirect()`, a `fetch()` result) throws. */
+async function kitResolve(event: RequestEvent): Promise<Response> {
+  const res = await app(event);
+  for (const s of (event as unknown as { __sets: CookieSet[] }).__sets) res.headers.append('set-cookie', `${s.name}=${s.value}`);
+  return res;
+}
 
 async function app(event: RequestEvent): Promise<Response> {
   const { pathname } = new URL(event.request.url);
@@ -102,7 +110,7 @@ const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((r) =
 /** Drives one request through the handle and settles everything the pipeline started off-path. */
 async function call(h: Handle, path: string, init: RequestInit = {}, o: EventOpts = {}): Promise<Response & { stub: Stub }> {
   const stub = stubEvent(new Request(`http://app.test${path}`, init), o);
-  const res = await h({ event: stub.event, resolve: app });
+  const res = await h({ event: stub.event, resolve: kitResolve });
   const body = res?.body ? await res.arrayBuffer() : null;   // send the body as the host would: the event ships once it has gone out
   await Promise.all(stub.waits);
   await settle();   // adapter-node has no waitUntil: the lazy snapshot load and the flush settle on their own
@@ -135,13 +143,13 @@ afterEach(() => resetCamada());
 describe('capture', () => {
   it('times an SSE body to its last byte, and an etagged one (SvelteKit may 304 it) at once', async () => {
     const h = await primed();
-    const res = await h({ event: stubEvent(new Request('http://app.test/stream')).event, resolve: app });
+    const res = await h({ event: stubEvent(new Request('http://app.test/stream')).event, resolve: kitResolve });
     await settle();
     expect(events.some((e) => e.p === '/stream')).toBe(false);   // the body is still going out
     expect(await res.text()).toBe('xxx');
     await settle();
     expect(events.find((e) => e.p === '/stream')!.dur as number).toBeGreaterThanOrEqual(140);
-    await h({ event: stubEvent(new Request('http://app.test/etag')).event, resolve: app });   // body never read, as after a 304
+    await h({ event: stubEvent(new Request('http://app.test/etag')).event, resolve: kitResolve });   // body never read, as after a 304
     await settle();
     expect(events.find((e) => e.p === '/etag')).toMatchObject({ st: 200 });
   });
@@ -233,20 +241,28 @@ describe('first-party beacon', () => {
 });
 
 describe('session', () => {
-  it('mints _sfp through event.cookies.set on a first visit, Secure only on https', async () => {
+  it('mints _sfp as one Set-Cookie on the response, Secure only on https', async () => {
     const h = await primed();
     const res = await call(h, '/');
-    expect(res.headers.get('set-cookie')).toBeNull();   // the framework adds the header, not the handle
-    expect(res.stub.sets).toHaveLength(1);
-    const [set] = res.stub.sets;
-    expect(set.name).toBe('_sfp');
-    expect(set.value).toMatch(/^[0-9a-f-]{36}$/);
-    expect(set.opts).toEqual({ path: '/', maxAge: 2592000, httpOnly: true, sameSite: 'lax', secure: false });
-    expect(events.at(-1)).toMatchObject({ sid: set.value, ns: 1 });
+    expect(res.stub.sets).toEqual([]);   // not through event.cookies.set: SvelteKit would append in place after resolve()
+    const cookies = res.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    const sid = /^_sfp=([0-9a-f-]{36}); Path=\/; Max-Age=2592000; HttpOnly; SameSite=Lax$/.exec(cookies[0])![1];
+    expect(events.at(-1)).toMatchObject({ sid, ns: 1 });
 
     const stub = stubEvent(new Request('https://app.test/'));
-    await h({ event: stub.event, resolve: app });
-    expect(stub.sets[0].opts.secure).toBe(true);
+    const https = await h({ event: stub.event, resolve: kitResolve });
+    expect(https.headers.getSetCookie()[0]).toMatch(/; Secure$/);
+  });
+
+  it('keeps exactly one _sfp on SSE and HEAD first visits, beside a cookie the app sets itself', async () => {
+    const h = await primed();
+    expect((await call(h, '/stream')).headers.getSetCookie().filter((c) => c.startsWith('_sfp='))).toHaveLength(1);
+    expect((await call(h, '/', { method: 'HEAD' })).headers.getSetCookie().filter((c) => c.startsWith('_sfp='))).toHaveLength(1);
+    const stub = stubEvent(new Request('http://app.test/'));
+    stub.event.cookies.set('theme', 'dark', {} as never);   // the app's own cookie, appended by the framework after the hook
+    const res = await h({ event: stub.event, resolve: kitResolve });
+    expect(res.headers.getSetCookie().map((c) => c.split('=')[0]).sort()).toEqual(['_sfp', 'theme']);
   });
 
   it('never overwrites an existing session', async () => {
@@ -256,13 +272,14 @@ describe('session', () => {
     expect(events.at(-1)).toMatchObject({ sid: 'known-sid', ns: 0 });
   });
 
-  it('passes a Response.redirect() from resolve through untouched, the cookie still set via the API', async () => {
+  it('answers a first visit to an immutable-headers Response (redirect, fetch()) with the cookie and x-rid, not a 500', async () => {
     const h = await primed();
     const res = await call(h, '/redirect');
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://app.test/');
     expect(res.headers.get('x-rid')).toBe(events.at(-1)!.rid);   // the immutable redirect is copied faithfully to carry x-rid
-    expect(res.stub.sets.map((s) => s.name)).toEqual(['_sfp']);
+    expect(res.headers.getSetCookie()).toHaveLength(1);
+    expect(res.headers.get('set-cookie')).toMatch(/^_sfp=/);
     expect(events.at(-1)).toMatchObject({ p: '/redirect', st: 302, ns: 1 });
   });
 });
@@ -281,7 +298,7 @@ describe('track', () => {
     expect(JSON.stringify(events)).not.toContain('alice');
 
     const first = await call(h, '/signup', { method: 'POST' });   // fire-and-forget, on the session just minted
-    expect(events.find((e) => e.et === 'signup')).toMatchObject({ uid: null, sid: first.stub.sets[0].value });
+    expect(events.find((e) => e.et === 'signup')).toMatchObject({ uid: null, sid: /^_sfp=([^;]+)/.exec(first.headers.get('set-cookie')!)![1] });
   });
 
   it('is a silent no-op where the handle did not run', async () => {
@@ -350,7 +367,7 @@ describe('resolving the client address', () => {
     const res = await call(h, '/admin/users', { headers: HTML }, { peer: null });   // a path on the challenge side
     expect(res.status).toBe(200);
     expect(events.at(-1)).toMatchObject({ p: '/admin/users', st: 200, ip: null });
-    expect(res.stub.sets.map((s) => s.name)).toEqual(['_sfp']);
+    expect(res.headers.getSetCookie()).toHaveLength(1);
   });
 });
 
