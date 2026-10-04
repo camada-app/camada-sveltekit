@@ -146,6 +146,17 @@ describe('capture', () => {
     expect(events.find((e) => e.p === '/etag')).toMatchObject({ st: 200 });
   });
 
+  it('sets x-rid to the event rid on every answered response, an etagged one included, and not on a block', async () => {
+    const h = await primed();
+    for (const path of ['/cart', '/stream', '/etag']) {
+      const res = await call(h, path);
+      expect(res.headers.get('x-rid'), path).toBe(events.find((e) => e.p === path)!.rid);
+    }
+    const blocked = await call(h, '/cart', {}, { peer: BLOCKED_IP });
+    expect(blocked.status).toBe(403);
+    expect(blocked.headers.has('x-rid')).toBe(false);
+  });
+
   it('lets an unlisted request through and ships the event with the real status, this tap and the sdk id', async () => {
     const h = await primed();
     expect((await call(h, '/')).status).toBe(200);
@@ -250,7 +261,7 @@ describe('session', () => {
     const res = await call(h, '/redirect');
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://app.test/');
-    expect(() => res.headers.set('x-a', '1')).toThrow();   // still the immutable redirect: nothing was rebuilt
+    expect(res.headers.get('x-rid')).toBe(events.at(-1)!.rid);   // the immutable redirect is copied faithfully to carry x-rid
     expect(res.stub.sets.map((s) => s.name)).toEqual(['_sfp']);
     expect(events.at(-1)).toMatchObject({ p: '/redirect', st: 302, ns: 1 });
   });
