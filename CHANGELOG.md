@@ -7,7 +7,8 @@ Needs `@camada/core` 0.5.0.
 ### Added
 
 - `x-rid` response header: the rid of the request's event row, on every response the app answers
-  (an etagged one too), via core's `finish()`. Not on camada's own answers or a 101.
+  (an etagged one too), via core's `finish()`. Not on camada's own answers or a 101, nor on
+  SvelteKit's own 304 for a matching `If-None-Match` (it keeps only a fixed header allow-list).
 
 ### Changed
 
