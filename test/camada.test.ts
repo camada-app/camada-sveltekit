@@ -172,7 +172,7 @@ describe('capture', () => {
     await call(h, '/nope');
     expect(events.at(-1)).toMatchObject({ p: '/nope', st: 404 });
     expect(sdkHeaders.length).toBeGreaterThan(0);
-    expect(sdkHeaders.every((s) => s === '@camada/sveltekit/0.1.2')).toBe(true);
+    expect(sdkHeaders.every((s) => s === '@camada/sveltekit/0.1.3')).toBe(true);
   });
 
   it('blocks a listed ip with 403 before resolve() and ships blk', async () => {
