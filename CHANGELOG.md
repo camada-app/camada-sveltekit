@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-10-12; follows 0.1.3)
 
 Needs the `@camada/core` that exports `readBodyCapped` (the streamed body cap on `/_cam/fp` and
 the challenge verify, camada-all-4u4i).
