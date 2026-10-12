@@ -444,6 +444,7 @@ describe('challenged navigation data requests (camada-all-wjln)', () => {
     const page = await call(h, '/admin/users', { headers: HTML });
     expect(page.status).toBe(403);
     expect(page.headers.get('content-type')).toContain('text/html');
+    expect(page.headers.get('content-security-policy')).toMatch(/^default-src 'none'; script-src 'sha256-/);   // core's page policy rides through (camada-all-mwpo)
   });
 
   it('the bounce never leaves the site', async () => {
