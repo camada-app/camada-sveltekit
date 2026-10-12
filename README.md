@@ -68,7 +68,14 @@ if camada were not installed.
    `st: 403` and `blk: <reason>` so the analyst counts SDK blocks apart from your own 403s.
 5. **Skip** → a skip rule or the allow list wins over a wider block.
 6. **Challenge** → a `403` proof-of-work page (HTML navigations) or `403 {"error":"challenge_required"}`
-   (everything else); `POST /__camada/challenge` verifies the solution, sets `_cch` and 302s back.
+   (API and `fetch()` calls); `POST /__camada/challenge` verifies the solution, sets `_cch` and 302s back.
+   A client-side navigation (SvelteKit fetching `<path>/__data.json` for an `<a>` to a page with a
+   server `load`) gets a data redirect to `/_cam/reload?to=<page>` instead, beside the beacon
+   (`scriptPath`'s directory). No app route matches that URL, so the client reloads it as a
+   document, and camada 302s that request to the page, which shows the challenge. Your error
+   page never renders a 403 for it. Keep `/_cam/*` free of app routes: a root catch-all route
+   (`src/routes/[...rest]`) would match the bounce URL, and the visitor would see that route
+   instead of the challenge.
 7. Otherwise `resolve(event)` runs, and the settled response ships one batched, redacted event
    with its real status (Authorization and Cookie values never leave the process; credential-looking
    query values are scrubbed — see `@camada/core`).

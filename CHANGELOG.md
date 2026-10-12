@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Needs the `@camada/core` that exports `readBodyCapped` (the streamed body cap on `/_cam/fp` and
+the challenge verify, camada-all-4u4i).
+
+### Fixed
+
+- A client-side navigation to a challenged page (`<path>/__data.json`) gets a SvelteKit data
+  redirect through camada's bounce path (`/_cam/reload?to=<page>`). The client loads that URL as
+  a document, the bounce 302s it to the page, and the visitor sees the challenge. Before, the
+  client rendered the app's 403 error page until a manual reload. A redirect straight to the
+  page would be followed client-side and loop. API and `fetch()` calls still get the `403` JSON
+  (camada-all-wjln).
+
 ## 0.1.3 (2026-10-09; follows 0.1.2)
 
 Needs `@camada/core` 0.5.1.
