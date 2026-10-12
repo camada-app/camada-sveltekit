@@ -7,6 +7,8 @@ the challenge verify, camada-all-4u4i).
 
 ### Fixed
 
+- README: adapter-node over plain http needs the `ORIGIN` env var, or SvelteKit's own form-POST
+  origin check rejects the challenge solve. (camada-all-xms0)
 - The bounce path's "is camada active" test is core's own (`FetchCamada.active()`) instead of a
   copy of its key logic, so the two cannot drift. Needs the `@camada/core` with `active()`.
   (camada-all-wjln)
