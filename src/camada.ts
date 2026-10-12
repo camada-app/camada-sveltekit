@@ -3,7 +3,7 @@
 // SvelteKit knows: the adapter-resolved client address, the per-request env and execution context
 // an edge adapter hands over, the cookie API, and `event.locals` as the per-request slot.
 import type { Handle, RequestEvent } from '@sveltejs/kit';
-import { guarded, parseKey, safeReturnTo, TAP_SVELTEKIT } from '@camada/core';
+import { guarded, safeReturnTo, TAP_SVELTEKIT } from '@camada/core';
 import { createFetchCamada, withRid, withSetCookie, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
 import iife from '@camada/browser/iife-string';
 import { SDK_ID } from './version.js';
@@ -109,9 +109,7 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
     const bounce = guarded(() => {
       const url = new URL(event.request.url);
       if (event.request.method !== 'GET' || url.pathname !== bouncePath) return null;
-      const env: Env = { ...ctx.env, ...opts.env };
-      const keyed = parseKey(opts.key || env.CAMADA_KEY) || (env.CAMADA_TOKEN && env.CAMADA_SNAPSHOT_TOKEN);
-      if (env.CAMADA_DISABLED === '1' || !keyed) return null;
+      if (!cam.active(ctx)) return null;
       return new Response(null, { status: 302, headers: { location: safeReturnTo(url.searchParams.get('to')), 'cache-control': 'no-store' } });
     }, null);
     if (bounce) return bounce;
