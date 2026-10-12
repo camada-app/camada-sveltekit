@@ -12,7 +12,8 @@ the challenge verify, camada-all-4u4i).
   a document, the bounce 302s it to the page, and the visitor sees the challenge. Before, the
   client rendered the app's 403 error page until a manual reload. A redirect straight to the
   page would be followed client-side and loop. API and `fetch()` calls still get the `403` JSON
-  (camada-all-wjln).
+  (camada-all-wjln). The bounce answers only while camada is active; a root catch-all route needs
+  a param matcher to leave `/_cam/*` alone (README, "The bounce path").
 
 ## 0.1.3 (2026-10-09; follows 0.1.2)
 

@@ -455,6 +455,13 @@ describe('challenged navigation data requests (camada-all-wjln)', () => {
     }
   });
 
+  it('the bounce path is the app\'s own while camada is inert (CAMADA_DISABLED, no key)', async () => {
+    const off = make({ env: { ...ENV, CAMADA_DISABLED: '1' } });
+    expect((await call(off, '/_cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).status).toBe(404);
+    const keyless = camada({ fetchImpl, env: { CAMADA_KEY: undefined } });
+    expect((await call(keyless, '/_cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).status).toBe(404);
+  });
+
   it('follows a custom scriptPath directory', async () => {
     const h = await primed({ scriptPath: '/api/cam/b.js', fpPath: '/api/cam/fp' });
     const res = await call(h, '/admin/users/__data.json', { headers: DATA });

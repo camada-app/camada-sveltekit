@@ -73,9 +73,9 @@ if camada were not installed.
    server `load`) gets a data redirect to `/_cam/reload?to=<page>` instead, beside the beacon
    (`scriptPath`'s directory). No app route matches that URL, so the client reloads it as a
    document, and camada 302s that request to the page, which shows the challenge. Your error
-   page never renders a 403 for it. Keep `/_cam/*` free of app routes: a root catch-all route
-   (`src/routes/[...rest]`) would match the bounce URL, and the visitor would see that route
-   instead of the challenge.
+   page never renders a 403 for it. The bounce answers only while camada is active (a key, and no
+   `CAMADA_DISABLED=1`); otherwise the path is your app's. See [The bounce path](#the-bounce-path-_camreload)
+   if you have a root catch-all route.
 7. Otherwise `resolve(event)` runs, and the settled response ships one batched, redacted event
    with its real status (Authorization and Cookie values never leave the process; credential-looking
    query values are scrubbed — see `@camada/core`).
@@ -83,6 +83,25 @@ if camada were not installed.
 A first visit gets the shared `_sfp` session cookie through `event.cookies.set()` — SvelteKit
 adds the header to whatever `resolve()` returns, so a `redirect()` or a raw `Response` passes
 through untouched.
+
+## The bounce path (`/_cam/reload`)
+
+`GET /_cam/reload?to=<page>` (in `scriptPath`'s directory) is camada's: it 302s to `to` (a
+same-site path only, anything else goes to `/`, `no-store`). It is how a challenged client-side
+navigation turns into a document request (see step 6). It only works while no app route matches
+`/_cam/reload`, since SvelteKit's client navigates client-side to any URL a route matches.
+
+A root catch-all (`src/routes/[...rest]`) matches it, and the visitor would see that route
+instead of the challenge. Keep the catch-all off camada's directory with a param matcher:
+
+```ts
+// src/params/notcam.ts
+import type { ParamMatcher } from '@sveltejs/kit';
+export const match = ((param) => !param.startsWith('_cam/')) satisfies ParamMatcher;
+```
+
+and rename the route directory `src/routes/[...rest]` → `src/routes/[...rest=notcam]`. With a
+custom `scriptPath`, test for its directory instead (`/api/cam/b.js` → `api/cam/`).
 
 ## Options
 
