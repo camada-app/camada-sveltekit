@@ -32,3 +32,5 @@ jobs:
         working-directory: camada-sveltekit
       - run: npm test
         working-directory: camada-sveltekit
+      - run: npx -y @arethetypeswrong/cli@0.18.5 --pack .
+        working-directory: camada-sveltekit
