@@ -3,7 +3,7 @@
 // SvelteKit knows: the adapter-resolved client address, the per-request env and execution context
 // an edge adapter hands over, the cookie API, and `event.locals` as the per-request slot.
 import type { Handle, RequestEvent } from '@sveltejs/kit';
-import { guarded, safeReturnTo, TAP_SVELTEKIT } from '@camada/core';
+import { guarded, parseKey, safeReturnTo, TAP_SVELTEKIT } from '@camada/core';
 import { createFetchCamada, withRid, withSetCookie, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
 import iife from '@camada/browser/iife-string';
 import { SDK_ID } from './version.js';
@@ -52,7 +52,7 @@ const HTML_DATA_SUFFIX = '.html__data.json';
 
 /** The page a SvelteKit `__data.json` request loads data for, or null when `url` is not one
  *  (kit's own strip_data_suffix, plus its trailing-slash and invalidation params). */
-export function dataRequestPage(url: URL): string | null {
+function dataRequestPage(url: URL): string | null {
   let path: string;
   if (url.pathname.endsWith(HTML_DATA_SUFFIX)) path = url.pathname.slice(0, -HTML_DATA_SUFFIX.length) + '.html';
   else if (url.pathname.endsWith(DATA_SUFFIX)) path = url.pathname.slice(0, -DATA_SUFFIX.length) || '/';
@@ -101,15 +101,21 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
     // with no user-agent or accept: one page view is one event, and the page-level verdict must
     // not be re-applied to the server's own load().
     if (event.isSubRequest) return resolve(event);
+    const ctx = contextOf(event);
     // The bounce a challenged data request sends the client through (see forNavigation): a
-    // same-site 302 back to the page, which then meets the verdict as a document request.
+    // same-site 302 back to the page, which then meets the verdict as a document request. Only
+    // while camada is active (core's own inert test: a key, and no CAMADA_DISABLED=1); otherwise
+    // the path is the app's.
     const bounce = guarded(() => {
       const url = new URL(event.request.url);
       if (event.request.method !== 'GET' || url.pathname !== bouncePath) return null;
+      const env: Env = { ...ctx.env, ...opts.env };
+      const keyed = parseKey(opts.key || env.CAMADA_KEY) || (env.CAMADA_TOKEN && env.CAMADA_SNAPSHOT_TOKEN);
+      if (env.CAMADA_DISABLED === '1' || !keyed) return null;
       return new Response(null, { status: 302, headers: { location: safeReturnTo(url.searchParams.get('to')), 'cache-control': 'no-store' } });
     }, null);
     if (bounce) return bounce;
-    const r = await cam.before(event.request, contextOf(event));
+    const r = await cam.before(event.request, ctx);
     if (!r) return resolve(event);
     if (r.response) return forNavigation(event.request, r.response, bouncePath);
     const vars = r.vars;
