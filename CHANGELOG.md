@@ -7,6 +7,9 @@ the challenge verify, camada-all-4u4i).
 
 ### Fixed
 
+- The bounce path's "is camada active" test is core's own (`FetchCamada.active()`) instead of a
+  copy of its key logic, so the two cannot drift. Needs the `@camada/core` with `active()`.
+  (camada-all-wjln)
 - A client-side navigation to a challenged page (`<path>/__data.json`) gets a SvelteKit data
   redirect through camada's bounce path (`/_cam/reload?to=<page>`). The client loads that URL as
   a document, the bounce 302s it to the page, and the visitor sees the challenge. Before, the
