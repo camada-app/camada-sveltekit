@@ -72,7 +72,7 @@ if camada were not installed.
    The solve is a form POST, so SvelteKit's own cross-site form check (`csrf.checkOrigin`) applies
    to it: on **adapter-node served over plain http** (a local run, or a proxy that terminates TLS
    without forwarding the scheme) set the `ORIGIN` env var to the public origin
-   (`ORIGIN=http://localhost:3000 node build`), or `protocol_header` / `host_header`, or
+   (`ORIGIN=http://localhost:3000 node build`), or `PROTOCOL_HEADER` / `HOST_HEADER` (e.g. `PROTOCOL_HEADER=x-forwarded-proto HOST_HEADER=x-forwarded-host`), or
    SvelteKit rejects the POST with "Cross-site POST form submissions are forbidden" before camada
    sees it and the visitor cannot pass.
    A client-side navigation (SvelteKit fetching `<path>/__data.json` for an `<a>` to a page with a
