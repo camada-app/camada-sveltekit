@@ -399,3 +399,87 @@ describe('cloudflare platform', () => {
     expect(events.at(-1)!.proto).toBeNull();
   });
 });
+
+// camada-all-wjln: a client-side navigation fetches `<path>/__data.json`, and SvelteKit's client
+// renders the root error page for a 403 there (kit 2.70.3 client.js load_data :3125-3139,
+// load_route :1238-1251). A `{"type":"redirect"}` to the same page would be followed client-side
+// (navigate() :1816-1830), fetch `__data.json` again and loop into the 20-redirect error. So the
+// redirect points at camada's bounce path (`/_cam/reload?to=<page>`), which no app route matches:
+// the client finds no navigation intent and falls back to a native navigation (navigate()
+// :1764 → server_fallback :2064-2084 → location.href), and the bounce 302s the document request
+// to the page, which meets the HTML challenge.
+describe('challenged navigation data requests (camada-all-wjln)', () => {
+  const DATA = { accept: '*/*', 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors' };
+  const dataRedirect = async (res: Response) => {
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/json');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = JSON.parse(await res.text()) as { type: string; location: string };
+    expect(body.type).toBe('redirect');
+    return body.location;
+  };
+
+  it('answers __data.json with a redirect to the bounce path, never to the page itself', async () => {
+    const h = await primed();
+    const res = await call(h, '/admin/users/__data.json?x-sveltekit-invalidated=01', { headers: DATA });
+    expect(await dataRedirect(res)).toBe('/_cam/reload?to=%2Fadmin%2Fusers');
+    expect(events.some((e) => e.st === 403 && e.blk === 'challenge')).toBe(true);
+  });
+
+  it('maps the root, a trailing slash, a .html page and the query back to the page URL', async () => {
+    const h = await primed();
+    const loc = async (path: string) => dataRedirect(await call(h, path, { headers: DATA }, { peer: CHALLENGED_IP }));
+    expect(await loc('/__data.json?x-sveltekit-invalidated=1')).toBe('/_cam/reload?to=%2F');
+    expect(await loc('/cart/__data.json?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01')).toBe('/_cam/reload?to=%2Fcart%2F');
+    expect(await loc('/about.html__data.json?x-sveltekit-invalidated=1')).toBe('/_cam/reload?to=%2Fabout.html');
+    expect(await loc('/cart/__data.json?page=2&x-sveltekit-invalidated=01')).toBe('/_cam/reload?to=%2Fcart%3Fpage%3D2');
+  });
+
+  it('the bounce 302s the native navigation to the page, which gets the HTML challenge', async () => {
+    const h = await primed();
+    const bounce = await call(h, '/_cam/reload?to=%2Fadmin%2Fusers', { headers: HTML });
+    expect(bounce.status).toBe(302);
+    expect(bounce.headers.get('location')).toBe('/admin/users');
+    expect(bounce.headers.get('cache-control')).toBe('no-store');
+    const page = await call(h, '/admin/users', { headers: HTML });
+    expect(page.status).toBe(403);
+    expect(page.headers.get('content-type')).toContain('text/html');
+  });
+
+  it('the bounce never leaves the site', async () => {
+    const h = await primed();
+    for (const to of ['https://evil.test/', '//evil.test/', '/\\evil.test']) {
+      const res = await call(h, `/_cam/reload?to=${encodeURIComponent(to)}`, { headers: HTML });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('/');
+    }
+  });
+
+  it('the bounce path is the app\'s own while camada is inert (CAMADA_DISABLED, no key)', async () => {
+    const off = make({ env: { ...ENV, CAMADA_DISABLED: '1' } });
+    expect((await call(off, '/_cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).status).toBe(404);
+    const keyless = camada({ fetchImpl, env: { CAMADA_KEY: undefined } });
+    expect((await call(keyless, '/_cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).status).toBe(404);
+  });
+
+  it('follows a custom scriptPath directory', async () => {
+    const h = await primed({ scriptPath: '/api/cam/b.js', fpPath: '/api/cam/fp' });
+    const res = await call(h, '/admin/users/__data.json', { headers: DATA });
+    expect(await dataRedirect(res)).toBe('/api/cam/reload?to=%2Fadmin%2Fusers');
+    expect((await call(h, '/api/cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).headers.get('location')).toBe('/admin/users');
+  });
+
+  it('an API/fetch request from app code still gets the 403 JSON', async () => {
+    const h = await primed();
+    const res = await call(h, '/admin/users', { headers: { accept: 'application/json' } });
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe('{"error":"challenge_required"}');
+  });
+
+  it('a block on a data request stays a block', async () => {
+    const h = await primed();
+    const res = await call(h, '/cart/__data.json', { headers: DATA }, { peer: BLOCKED_IP });
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-block-reason')).toBe('ip4');
+  });
+});

@@ -3,7 +3,7 @@
 // SvelteKit knows: the adapter-resolved client address, the per-request env and execution context
 // an edge adapter hands over, the cookie API, and `event.locals` as the per-request slot.
 import type { Handle, RequestEvent } from '@sveltejs/kit';
-import { guarded, TAP_SVELTEKIT } from '@camada/core';
+import { guarded, parseKey, safeReturnTo, TAP_SVELTEKIT } from '@camada/core';
 import { createFetchCamada, withRid, withSetCookie, track as coreTrack, scriptTag as coreScriptTag, type FetchCamada, type FetchCamadaOptions, type FetchRequestContext, type FetchVars } from '@camada/core/fetch';
 import iife from '@camada/browser/iife-string';
 import { SDK_ID } from './version.js';
@@ -47,6 +47,46 @@ function contextOf(event: RequestEvent): FetchRequestContext {
   };
 }
 
+const DATA_SUFFIX = '/__data.json';
+const HTML_DATA_SUFFIX = '.html__data.json';
+
+/** The page a SvelteKit `__data.json` request loads data for, or null when `url` is not one
+ *  (kit's own strip_data_suffix, plus its trailing-slash and invalidation params). */
+function dataRequestPage(url: URL): string | null {
+  let path: string;
+  if (url.pathname.endsWith(HTML_DATA_SUFFIX)) path = url.pathname.slice(0, -HTML_DATA_SUFFIX.length) + '.html';
+  else if (url.pathname.endsWith(DATA_SUFFIX)) path = url.pathname.slice(0, -DATA_SUFFIX.length) || '/';
+  else return null;
+  const q = new URLSearchParams(url.search);
+  if (q.get('x-sveltekit-trailing-slash') === '1' && !path.endsWith('/')) path += '/';
+  q.delete('x-sveltekit-trailing-slash');
+  q.delete('x-sveltekit-invalidated');
+  const search = q.toString();
+  return path + (search ? '?' + search : '');
+}
+
+/**
+ * A challenged client-side navigation (camada-all-wjln). SvelteKit's client fetches
+ * `<path>/__data.json` and renders the root error page for a 403 there, so the visitor would never
+ * meet the challenge. A data `{"type":"redirect"}` to the page itself does not help: the client
+ * follows it client-side, fetches `__data.json` again and loops into its 20-redirect error. So the
+ * redirect points at camada's bounce path (`<scriptPath dir>/reload?to=<page>`). No app route
+ * matches it, so the client falls back to a native navigation (`location.href`), and the bounce
+ * then 302s that document request to the page, which gets the HTML challenge. Every other answer,
+ * and any request that is not a `__data.json` fetch (an API call from app code), is left as it is.
+ */
+function forNavigation(req: Request, res: Response, bouncePath: string): Response {
+  return guarded(() => {
+    if (res.status !== 403 || res.headers.get('x-camada-challenge') !== '1') return res;
+    const page = dataRequestPage(new URL(req.url));
+    if (page === null) return res;
+    void res.body?.cancel().catch(() => {});
+    return new Response(JSON.stringify({ type: 'redirect', location: `${bouncePath}?to=${encodeURIComponent(page)}` }), {
+      status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-camada-challenge': '1' },
+    });
+  }, res);
+}
+
 /**
  * The `handle` for `src/hooks.server.ts`: `export const handle = camada()`, or first in a
  * `sequence()`. Reads `CAMADA_KEY` (+ `CAMADA_INGEST_URL` / `CAMADA_SNAPSHOT_URL`) from
@@ -55,14 +95,29 @@ function contextOf(event: RequestEvent): FetchRequestContext {
 export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
   const cam = createFetchCamada({ tap: TAP_SVELTEKIT, sdk: SDK_ID, iife }, opts);   // mode defaults to lazy in core: the handle may run on edge/serverless
   instances.add(cam);
+  const bouncePath = (opts.scriptPath ?? '/_cam/b.js').replace(/[^/]*$/, 'reload');   // beside the beacon: camada's own directory
   return async ({ event, resolve }) => {
     // A server-side `event.fetch` to the app's own routes runs the handle again on a fresh event
     // with no user-agent or accept: one page view is one event, and the page-level verdict must
     // not be re-applied to the server's own load().
     if (event.isSubRequest) return resolve(event);
-    const r = await cam.before(event.request, contextOf(event));
+    const ctx = contextOf(event);
+    // The bounce a challenged data request sends the client through (see forNavigation): a
+    // same-site 302 back to the page, which then meets the verdict as a document request. Only
+    // while camada is active (core's own inert test: a key, and no CAMADA_DISABLED=1); otherwise
+    // the path is the app's.
+    const bounce = guarded(() => {
+      const url = new URL(event.request.url);
+      if (event.request.method !== 'GET' || url.pathname !== bouncePath) return null;
+      const env: Env = { ...ctx.env, ...opts.env };
+      const keyed = parseKey(opts.key || env.CAMADA_KEY) || (env.CAMADA_TOKEN && env.CAMADA_SNAPSHOT_TOKEN);
+      if (env.CAMADA_DISABLED === '1' || !keyed) return null;
+      return new Response(null, { status: 302, headers: { location: safeReturnTo(url.searchParams.get('to')), 'cache-control': 'no-store' } });
+    }, null);
+    if (bounce) return bounce;
+    const r = await cam.before(event.request, ctx);
     if (!r) return resolve(event);
-    if (r.response) return r.response;
+    if (r.response) return forNavigation(event.request, r.response, bouncePath);
     const vars = r.vars;
     guarded(() => { (event.locals as Record<string, unknown>)[VAR] = vars; }, undefined);
     // The _sfp cookie rides the response, not `event.cookies.set`: SvelteKit appends those in place
