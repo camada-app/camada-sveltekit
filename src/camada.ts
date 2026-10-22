@@ -73,7 +73,7 @@ function dataRequestPage(url: URL): string | null {
  * redirect points at camada's bounce path (`<scriptPath dir>/reload?to=<page>`). No app route
  * matches it, so the client falls back to a native navigation (`location.href`), and the bounce
  * then 302s that document request to the page, which gets the HTML challenge. Every other answer,
- * and any request that is not a `__data.json` fetch (an API call from app code), is left as it is.
+ * and any request that is not a `__data.json` fetch, is left as it is.
  */
 function forNavigation(req: Request, res: Response, bouncePath: string): Response {
   return guarded(() => {
@@ -113,7 +113,7 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
       return new Response(null, { status: 302, headers: { location: safeReturnTo(url.searchParams.get('to')), 'cache-control': 'no-store' } });
     }, null);
     if (bounce) return bounce;
-    const r = await cam.before(event.request, ctx);
+    const r = await cam.before(event.request, { ...ctx, navigation: event.isDataRequest });
     if (!r) return resolve(event);
     if (r.response) return forNavigation(event.request, r.response, bouncePath);
     const vars = r.vars;
