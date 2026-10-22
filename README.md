@@ -67,8 +67,9 @@ if camada were not installed.
 4. **Block** → `403` with `x-block-reason` before `resolve()`; the event still ships, with
    `st: 403` and `blk: <reason>` so the analyst counts SDK blocks apart from your own 403s.
 5. **Skip** → a skip rule or the allow list wins over a wider block.
-6. **Challenge** → a `403` proof-of-work page (HTML navigations) or `403 {"error":"challenge_required"}`
-   (API and `fetch()` calls); `POST /__camada/challenge` verifies the solution, sets `_cch` and 302s back.
+6. **Challenge** → a `403` proof-of-work page (HTML navigations); API and `fetch()` calls
+   pass to your app with `x-camada-challenge: 1` on the response (and `chs: 1` on the event) so your
+   frontend can choose to challenge; `POST /__camada/challenge` verifies the solution, sets `_cch` and 302s back.
    The solve is a form POST, so SvelteKit's own cross-site form check (`csrf.checkOrigin`) applies
    to it: on **adapter-node served over plain http** (a local run, or a proxy that terminates TLS
    without forwarding the scheme) set the `ORIGIN` env var to the public origin

@@ -55,9 +55,19 @@ function stubEvent(request: Request, o: EventOpts = {}): Stub {
   const waits: Promise<unknown>[] = [];
   const peer = o.peer === undefined ? '8.8.8.8' : o.peer;
   const platform: Platform | undefined = o.platform ? { ...o.platform, context: { waitUntil: (p) => { waits.push(p); } } } : undefined;
+  // As in kit's respond.js: a `__data.json` request reaches handle with the suffix and the
+  // trailing-slash / invalidated params stripped from `event.url`, and `isDataRequest` set.
+  const url = new URL(request.url);
+  const isDataRequest = /(\.html|\/)__data\.json$/.test(url.pathname);
+  if (isDataRequest) {
+    url.pathname = url.pathname.replace(/\/__data\.json$/, '').replace(/\.html__data\.json$/, '.html') || '/';
+    url.searchParams.delete('x-sveltekit-trailing-slash');
+    url.searchParams.delete('x-sveltekit-invalidated');
+  }
   const event = {
     request,
-    url: new URL(request.url),
+    url,
+    isDataRequest,
     locals: {},
     platform,
     isSubRequest: o.isSubRequest ?? false,
@@ -470,11 +480,11 @@ describe('challenged navigation data requests (camada-all-wjln)', () => {
     expect((await call(h, '/api/cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).headers.get('location')).toBe('/admin/users');
   });
 
-  it('an API/fetch request from app code still gets the 403 JSON', async () => {
+  it('an API/fetch request from app code reaches the app, carrying the challenge signal', async () => {
     const h = await primed();
     const res = await call(h, '/admin/users', { headers: { accept: 'application/json' } });
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('{"error":"challenge_required"}');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-camada-challenge')).toBe('1');
   });
 
   it('a block on a data request stays a block', async () => {
