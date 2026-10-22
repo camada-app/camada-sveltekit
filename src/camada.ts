@@ -113,7 +113,7 @@ export function camada(opts: CamadaSvelteKitOptions = {}): Handle {
       return new Response(null, { status: 302, headers: { location: safeReturnTo(url.searchParams.get('to')), 'cache-control': 'no-store' } });
     }, null);
     if (bounce) return bounce;
-    const r = await cam.before(event.request, ctx);
+    const r = await cam.before(event.request, { ...ctx, navigation: dataRequestPage(event.url) !== null });
     if (!r) return resolve(event);
     if (r.response) return forNavigation(event.request, r.response, bouncePath);
     const vars = r.vars;
