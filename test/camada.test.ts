@@ -470,11 +470,11 @@ describe('challenged navigation data requests (camada-all-wjln)', () => {
     expect((await call(h, '/api/cam/reload?to=%2Fadmin%2Fusers', { headers: HTML })).headers.get('location')).toBe('/admin/users');
   });
 
-  it('an API/fetch request from app code still gets the 403 JSON', async () => {
+  it('an API/fetch request from app code reaches the app, carrying the challenge signal', async () => {
     const h = await primed();
     const res = await call(h, '/admin/users', { headers: { accept: 'application/json' } });
-    expect(res.status).toBe(403);
-    expect(await res.text()).toBe('{"error":"challenge_required"}');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-camada-challenge')).toBe('1');
   });
 
   it('a block on a data request stays a block', async () => {
