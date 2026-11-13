@@ -1,10 +1,12 @@
 # @camada/sveltekit
 
+[Frameworks](https://www.camada.app/frameworks) · [Docs](https://www.camada.app/docs) · [Bot detection](https://www.camada.app/bot-detection) · [Bot signal test](https://www.camada.app/tools/bot-test) · [Pricing](https://www.camada.app/pricing).
+
 camada for [SvelteKit](https://svelte.dev/docs/kit) as a `handle` hook: enforces the tenant
 snapshot inline (your ordered custom rules, then block, allow, challenge), serves a first-party
 proof-of-work challenge page and beacon, records the outcomes your actions know (`track()`), and
-ships wire events off the response path — through `waitUntil` on Cloudflare, in the background
-on Node. Fails open by design — a camada outage or bug never 5xxes your app.
+ships wire events off the response path (`waitUntil` on Cloudflare, background flush
+on Node). Fails open by design: a camada outage or bug never 5xxes your app.
 
 ```sh
 npm install @camada/sveltekit
@@ -49,16 +51,16 @@ if camada were not installed.
 
 ## What it does per request
 
-1. Refreshes the snapshot off-path (lazy mode by default — no interval timers, so the handle is
+1. Refreshes the snapshot off-path (lazy mode by default, with no interval timers, so the handle is
    safe on edge and serverless adapters; `mode: 'timer'` polls on an unref'd interval for a
    long-lived adapter-node process). Every poll and event batch carries
-   `x-camada-sdk: @camada/sveltekit/<version>`, and polls ask for snapshot v5 — the container
+   `x-camada-sdk: @camada/sveltekit/<version>`, and polls ask for snapshot v5, the container
    that carries your ordered custom rules.
-2. Resolves the client from `event.getClientAddress()` — the address your adapter vouches for
+2. Resolves the client from `event.getClientAddress()`, the address your adapter vouches for
    (adapter-node honours its `ADDRESS_HEADER` / `XFF_DEPTH`, adapter-cloudflare reads
-   `cf-connecting-ip`) — falling back to `X-Forwarded-For` only under your tenant's
+   `cf-connecting-ip`), falling back to `X-Forwarded-For` only under your tenant's
    trusted-proxy config. A client header alone is never the ip. When the adapter has no address
-   (prerendering) the ip is null: ip rules and the challenge stand down, the event still ships —
+   (prerendering) the ip is null: ip rules and the challenge stand down, and the event still ships,
    so a `vite build` with prerendered routes ships one first-visit page event per route from the
    build machine; set `CAMADA_DISABLED=1` in the build env to suppress them. A server-side
    `event.fetch` to the app's own routes (`isSubRequest`) is left alone: one page view is one
@@ -85,9 +87,9 @@ if camada were not installed.
    if you have a root catch-all route.
 7. Otherwise `resolve(event)` runs, and the settled response ships one batched, redacted event
    with its real status (Authorization and Cookie values never leave the process; credential-looking
-   query values are scrubbed — see `@camada/core`).
+   query values are scrubbed; see `@camada/core`).
 
-A first visit gets the shared `_sfp` session cookie through `event.cookies.set()` — SvelteKit
+A first visit gets the shared `_sfp` session cookie through `event.cookies.set()`: SvelteKit
 adds the header to whatever `resolve()` returns, so a `redirect()` or a raw `Response` passes
 through untouched.
 
@@ -149,10 +151,10 @@ export const load = (event) => ({ camada: scriptTag(event) });
 <svelte:head>{@html data.camada}</svelte:head>
 ```
 
-`scriptTag(event)` returns `<script src="/_cam/b.js?r=<rid>" async></script>` — the `rid` is this
+`scriptTag(event)` returns `<script src="/_cam/b.js?r=<rid>" async></script>`: the `rid` is this
 request's event id, so the analyst joins the beacon to the page view. The handle serves the
 script at `GET /_cam/b.js` (cacheable, 1 h) and relays `POST /_cam/fp` (≤ 32 KB, answers 204)
-onto the event batch as a `sig: 1` row stamped with the client ip camada resolved — never the
+onto the event batch as a `sig: 1` row stamped with the client ip camada resolved, never the
 one the body claims. Both endpoints sit behind the verdict: a blocked client gets 403 there too.
 The tag is `''` when camada is off for the request or the project turned the beacon off in its
 settings, and the endpoints stand down with it.
@@ -177,7 +179,7 @@ export const actions = {
 ```
 
 `track(event, name, { user? })` ships `{ et, uid, rid, sid, ip, ts }` joined to this request's
-event. The user identifier is HMAC-hashed in-process with the ingest token — the raw value never
+event. The user identifier is HMAC-hashed in-process with the ingest token: the raw value never
 leaves the process. It never throws and is a no-op where the handle did not run. The event name
 is free-form; the analyst's rules read this vocabulary:
 
@@ -200,10 +202,20 @@ on adapter-cloudflare `event.platform.cf` also supplies `asn`, `country`,
 TLS-fingerprint rules on them locally and stamps `asn`, `cc`, `tlsx` and the visitor's own
 protocol on the event, but rules on those conditions are reported as not
 enforceable by this SDK and the shipped facts are enrichment only. On adapter-node and the
-other adapters none of those exist — the request arrives as a `Request` with no connection
-facts, no client protocol, and headers already normalised — so those rules do not fire. No forwarded header is ever read for any of them.
+other adapters none of those exist (the request arrives as a `Request` with no connection
+facts, no client protocol, and headers already normalised), so those rules do not fire. No forwarded header is ever read for any of them.
 
 ## Fail open
 
 Every entry point runs inside camada's guard. A dead ingest, a corrupt snapshot, a bug in this
 package: telemetry is lost, the request is not.
+
+## Docs and links
+
+Read the guides on [camada.app](https://www.camada.app/docs).
+
+- [Frameworks](https://www.camada.app/frameworks): browse all server SDKs and Web-fetch adapters.
+- [Custom rules](https://www.camada.app/docs/rules) and [Challenge](https://www.camada.app/docs/challenge): order your rules and tune browser checks.
+- [Bot detection](https://www.camada.app/bot-detection): see how snapshots, beacons, and `track()` catch bots.
+- [Bot signal test](https://www.camada.app/tools/bot-test): check live browser, HTTP, and TLS signals from your client.
+- [Pricing](https://www.camada.app/pricing): compare the free tier and paid plans.

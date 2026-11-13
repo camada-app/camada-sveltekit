@@ -18,6 +18,29 @@
     "check": "tsc --noEmit"
   },
   "description": "camada SDK for SvelteKit (hooks.server.ts handle): snapshot enforcement, first-party challenge and beacon, track() outcomes, waitUntil-flushed event shipping on Cloudflare",
+  "homepage": "https://www.camada.app/frameworks",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camada-app/camada-sveltekit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/camada-app/camada-sveltekit/issues"
+  },
+  "keywords": [
+    "camada",
+    "sveltekit",
+    "svelte",
+    "cloudflare-workers",
+    "nodejs",
+    "bot-detection",
+    "bot-protection",
+    "credential-stuffing",
+    "account-takeover",
+    "rate-limiting",
+    "proof-of-work",
+    "ai-scraper",
+    "security"
+  ],
   "exports": {
     ".": {
       "import": {
