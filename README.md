@@ -86,8 +86,9 @@ if camada were not installed.
    `CAMADA_DISABLED=1`); otherwise the path is your app's. See [The bounce path](#the-bounce-path-_camreload)
    if you have a root catch-all route.
 7. Otherwise `resolve(event)` runs, and the settled response ships one batched, redacted event
-   with its real status (Authorization and Cookie values never leave the process; credential-looking
-   query values are scrubbed; see `@camada/core`).
+   with its real status. Authorization contributes its scheme and, with opt-in `tokenHash`, a
+   keyed credential hash as `tk`. Authorization and Cookie values stay in the process, and
+   credential-looking query values are scrubbed.
 
 A first visit gets the shared `_sfp` session cookie through `event.cookies.set()`: SvelteKit
 adds the header to whatever `resolve()` returns, so a `redirect()` or a raw `Response` passes
@@ -131,6 +132,26 @@ custom `scriptPath`, test for its directory instead (`/api/cam/b.js` → `api/ca
 `CAMADA_CHALLENGE=0` in the env switches the challenge off without a code change.
 
 `CAMADA_DISABLED=1` in the env switches everything off, checked per request.
+
+## Credential hash (opt-in, off by default)
+
+Set `tokenHash: true` or `CAMADA_TOKEN_HASH=1` to include `tk` on request
+events with an eligible credential. An explicit `tokenHash: false` overrides
+the environment variable.
+
+`tk` is the first 32 hex characters of HMAC-SHA256, keyed with your ingest
+token, over `tok:` plus the credential. The credential is the part of
+`Authorization` after the scheme (for example, the Bearer token). Set
+`tokenHeader: 'x-api-key'` or `CAMADA_TOKEN_HEADER` to prefer the whole value
+of that header when it contains an eligible credential. The credential itself
+stays in the process. Values shorter than 8 characters or outside printable
+ASCII are skipped.
+
+camada uses `tk` to spot one credential replayed from many clients. Enable it
+for random tokens or API keys. Avoid enabling it for human passwords over
+Basic auth because anyone holding both your events and your ingest token
+could test password guesses against the hash. Rotating the ingest token
+changes every `tk`.
 
 ## The first-party beacon
 

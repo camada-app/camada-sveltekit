@@ -2,7 +2,7 @@
 // a resolve() that answers a fixed Response per path — what SvelteKit hands the handle, minus the
 // framework. The fixtures are read through the file: symlink to @camada/core, so this package is
 // pinned to the same bytes edge-analyst generates.
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +149,27 @@ const postBeacon = (h: Handle, body: string, peer = '9.9.9.9') =>
 beforeAll(() => { delete process.env.CAMADA_KEY; delete process.env.CAMADA_TOKEN; delete process.env.CAMADA_DISABLED; });   // the handle merges process.env; a developer's shell must not steer the suite
 beforeEach(() => { events = []; sdkHeaders = []; });
 afterEach(() => resetCamada());
+
+describe('credential hash', () => {
+  const env = { ...ENV, CAMADA_KEY: 'ct_test_fixture_key.snap-test', CAMADA_TOKEN_HASH: undefined };
+  const headers = { authorization: 'Bearer fake-token-0001-not-a-real-credential' };
+
+  it('omits tk from the shipped event by default', async () => {
+    const h = await primed({ env });
+    await call(h, '/cart', { headers });
+    const event = events.find((e) => e.p === '/cart');
+    expect(event).toMatchObject({ st: 200, auth: 'Bearer' });
+    expect(event).not.toHaveProperty('tk');
+  });
+
+  it('ships tk when tokenHash is enabled', async () => {
+    const h = await primed({ env, tokenHash: true });
+    await call(h, '/cart', { headers });
+    await vi.waitFor(() => expect(events.find((e) => e.p === '/cart')).toMatchObject({
+      st: 200, tk: 'b3a18c6c56d5a2f7ad636bf950a919d7',
+    }));
+  });
+});
 
 describe('capture', () => {
   it('times an SSE body to its last byte, and an etagged one (SvelteKit may 304 it) at once', async () => {
